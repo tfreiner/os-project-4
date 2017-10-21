@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
- * Date: October 19th, 2017
- * Log: Setting up clock 
+ * Date: October 20th, 2017
+ * Log: Setting up bit array
  */
 
 #include <stdio.h>
@@ -12,12 +12,15 @@
 #include <signal.h>
 #include <unistd.h>
 #include <semaphore.h>
+#include <stdbool.h>
 #include <time.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <sys/wait.h>
 #include <errno.h>
 #include <sys/types.h>
+
+#define BIT_COUNT 32
 
 int sharedmem[3];
 int processCount = 0;
@@ -28,11 +31,24 @@ union semun {
 };
 
 struct controlBlockStruct {
+	int pid;
 	int cpuTime;
 	int systemTime;
 	int lastBurstTime;
 	int processPriority;
 } controlBlockStruct[19];
+
+void setBit(int bitArray[], int i){
+	bitArray[i/BIT_COUNT] |= 1 << (i % BIT_COUNT);
+}
+
+void unsetBit(int bitArray[], int i){
+	bitArray[i/BIT_COUNT] &= ~(1 << (i % BIT_COUNT));
+}
+
+bool checkBit(int bitArray[], int i){
+	return ((bitArray[i/BIT_COUNT] & (1 << (i % BIT_COUNT))) != 0);
+}
 
 void clean(int sig){
 	fprintf(stderr, "Interrupt signaled. Removing shared memory and killing processes.\n");
@@ -51,6 +67,8 @@ int main(int argc, char* argv[])  {
 	union semun arg;
 	arg.val = 1;
 	int i;
+	int bitArray[1] = { 0 };
+	bool tableFull = 0;
 
 	//SIGNAL HANDLING
 	signal(SIGINT, clean);
@@ -98,13 +116,15 @@ int main(int argc, char* argv[])  {
 	//CREATING PROCESSES
 	int forkTime;
 	int incrementTime;
-	int *lastForkTime;
-	lastForkTime = clock;
+	int lastForkTime[2];
+	lastForkTime[0] = clock[0];
+	lastForkTime[1] = clock[1];
 	pid_t childpid;
 	srand(time(NULL));
 	forkTime = rand() % 3;
-	for(i = 0; i < 19; i++){
+	while(!tableFull){
 		incrementTime = rand() % 1000;
+		printf("lastForkTime: %d\n", lastForkTime[0] + lastForkTime[1]);
 		printf("forkTime: %d\n", forkTime);
 		printf("incrementTime: %d\n", incrementTime);
 		clock[0] += 1;
@@ -114,25 +134,36 @@ int main(int argc, char* argv[])  {
 		}
 		else
 			clock[1] += incrementTime;
-
 		if(((clock[0] * 1000000000 + clock[1]) - (lastForkTime[0] * 1000000000 + lastForkTime[1]) > (forkTime * 1000000000))){
-			lastForkTime = clock;
+			lastForkTime[0] = clock[0];
+			lastForkTime[1] = clock[1];
 			forkTime = rand() % 3;
-			childpid = fork();
-			if(errno){
-				fprintf(stderr, "%s", strerror(errno));
-				exit(1);
+			for(i = 0; i < 2; i++){
+				if(checkBit(bitArray, i) == 0){
+					tableFull = 0;
+					setBit(bitArray, i);
+					i = 2;
+				}
+				tableFull = 1;
 			}
+			if(!tableFull){
+				childpid = fork();
+				controlBlockStruct[i].pid = childpid;
+				if(errno){
+					fprintf(stderr, "%s", strerror(errno));
+					exit(1);
+				}
 		
-			if(childpid == 0)
-				execl("./user", "user", NULL);
+				if(childpid == 0)
+					execl("./user", "user", NULL);
 
-			if(errno){
-				fprintf(stderr, "%s\n", strerror(errno));
-				exit(1);
+				if(errno){
+					fprintf(stderr, "%s\n", strerror(errno));
+					exit(1);
+				}
+				processIds[i] = childpid;
+				processCount++;
 			}
-			processIds[i] = childpid;
-			processCount++;
 		}
 	}
 	
