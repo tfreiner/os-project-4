@@ -1,6 +1,6 @@
 /**
  * Author: Taylor Freiner
- * Date: October 21th, 2017
+ * Date: October 21st, 2017
  * Log: Adding to scheduler
  */
 
@@ -19,6 +19,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <sys/types.h>
+#include "pcb.h"
 
 #define BIT_COUNT 32
 #define PROCESS_MAX 19
@@ -86,20 +87,7 @@ void delete(int q, int pid){
 	}
 }
 
-typedef struct controlBlockStruct {
-	int pid;
-	int cpuTime;
-	int systemTime;
-	int lastBurstTime;
-	int processPriority;
-	int waitTime[2];
-	int q;
-	int p;
-	int task;
-	int quantum[2];
-} controlBlockStruct;
-
-int schedule(int, controlBlockStruct*);
+int schedule(int, controlBlockStruct*, int*);
 
 bool isReady(int, int, controlBlockStruct*);
 void setBit(int bitArray[], int i){
@@ -209,7 +197,7 @@ int main(int argc, char* argv[])  {
 			lastForkTime[0] = clock[0];
 			lastForkTime[1] = clock[1];
 			forkTime = rand() % 3;
-			for(i = 0; i < 2; i++){
+			for(i = 0; i < 19; i++){
 				if(checkBit(bitArray, i) == 0){
 					tableFull = 0;
 					setBit(bitArray, i);
@@ -220,26 +208,32 @@ int main(int argc, char* argv[])  {
 			if(!tableFull){
 				printf("TABLE NOT FULL\n");
 				childpid = fork();
-				controlBlock[i].pid = childpid;
 				if(errno){
 					fprintf(stderr, "%s", strerror(errno));
 					exit(1);
 				}
-		
-				if(childpid == 0)
-					execl("./user", "user", NULL);
 
+				fprintf(file, "OSS: Generating process with PID %d and putting it in queue 0 at time %d:%d\n", childpid, clock[0], clock[1]);
+		
+				if(childpid == 0){
+					char arg[12];
+					sprintf(arg, "%d", childpid);
+					execl("./user", "user", arg, NULL);
+				} else {
+					controlBlock[i].pid = childpid;
+					insert(0, childpid);
+					int num = schedule(childpid, controlBlock, clock);
+				}
 				if(errno){
 					fprintf(stderr, "%s\n", strerror(errno));
 					exit(1);
 				}
-				int num = schedule(childpid, controlBlock);
-				if(num == 1)
-					printf("END PROCESS\n\n\n");
-				else{
-					processIds[i] = childpid;
-					processCount++;
-				}
+				//if(num == 1)
+				//	printf("END PROCESS\n\n\n");
+				//else{
+				//	processIds[i] = childpid;
+				//	processCount++;
+				//}
 			}
 		}
 	}
@@ -255,15 +249,14 @@ int main(int argc, char* argv[])  {
 	return 0;
 }
 
-int schedule(int pid, controlBlockStruct* controlBlock){
-	printf("\t\t\t\tSCHEDULE\n");
+int schedule(int pid, controlBlockStruct* controlBlock, int *clock){
+	printf("SCHEDULE\n");
 	int i;
 	int waitTime[2];
 	int quantum[2];
 	quantum[0] = 2;
 	quantum[1] = 5000;
 	insert(0, pid);
-	srand(time(NULL));
 	int randNum = rand() % 4;
 	int r = rand() % 6;
 	int s = rand() % 1001;
@@ -310,10 +303,10 @@ int schedule(int pid, controlBlockStruct* controlBlock){
 }
 
 bool isReady(int pid, int q, controlBlockStruct* controlBlock){
-	printf("\t\t\t\tIS READY\n");	
+	printf("IS READY: PID: %d\n", pid);	
 	int i, j;
-	int averageWaitTime;
-	int totalTime;
+	int averageWaitTime = 0;
+	int totalTime = 0;
 	int processCount = 0;
 	int processIds[19];
 	int processNum = -1;
@@ -321,6 +314,7 @@ bool isReady(int pid, int q, controlBlockStruct* controlBlock){
 	for(i = 0; i < 19; i++){
 		if(controlBlock[i].pid == pid){
 			processNum = i;
+			printf("PROCESS NUM----------: %d", processNum);
 			break;
 		}
 	}
@@ -335,6 +329,7 @@ bool isReady(int pid, int q, controlBlockStruct* controlBlock){
 			for(i = 0; i < 19; i++){
 				if(queue0[i] != -1){
 					processIds[i] = queue0[i];
+					printf("ID IN Q: %d\n", queue0[i]);
 					for(j = 0; j < 19; j++){
 						if(controlBlock[j].pid == processIds[i]){
 							totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
@@ -347,6 +342,7 @@ bool isReady(int pid, int q, controlBlockStruct* controlBlock){
 				}
 			}
 			printf("TOTAL TIME: %d\n", totalTime);
+			printf("PROCESS COUNT: %d\n", processCount);
 			averageWaitTime = totalTime/processCount;
 			return 0;
 			if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > A * averageWaitTime)
