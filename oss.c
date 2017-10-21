@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
  * Date: October 21th, 2017
- * Log: Setting up scheduler
+ * Log: Adding to scheduler
  */
 
 #include <stdio.h>
@@ -101,6 +101,7 @@ typedef struct controlBlockStruct {
 
 int schedule(int, controlBlockStruct*);
 
+bool isReady(int, int, controlBlockStruct*);
 void setBit(int bitArray[], int i){
 	bitArray[i/BIT_COUNT] |= 1 << (i % BIT_COUNT);
 }
@@ -161,8 +162,7 @@ int main(int argc, char* argv[])  {
 	sharedmem[2] = semid;
 	int *clock = (int *)shmat(memid, NULL, 0);
 	controlBlock = (controlBlockStruct *)shmat(memid2, NULL, 0);
-	int *errorCheck = -1;
-	if(*clock == -1 || controlBlock == errorCheck){
+	if(*clock == -1 || (int*)controlBlock == (int*)-1){
 		printf("%s: ", argv[0]);
 		perror("Error\n");
 	}
@@ -175,6 +175,13 @@ int main(int argc, char* argv[])  {
 	if(errno){
 		fprintf(stderr, "%s\n", strerror(errno));
 		exit(1);
+	}
+
+	//INITIALIZING QUEUES
+	for(i = 0; i < 19; i++){
+		queue0[i] = -1;
+		queue1[i] = -1;
+		queue2[i] = -1;
 	}
 
 	//CREATING PROCESSES
@@ -227,7 +234,7 @@ int main(int argc, char* argv[])  {
 					exit(1);
 				}
 				int num = schedule(childpid, controlBlock);
-				if(num == 0)
+				if(num == 1)
 					printf("END PROCESS\n\n\n");
 				else{
 					processIds[i] = childpid;
@@ -249,6 +256,7 @@ int main(int argc, char* argv[])  {
 }
 
 int schedule(int pid, controlBlockStruct* controlBlock){
+	printf("\t\t\t\tSCHEDULE\n");
 	int i;
 	int waitTime[2];
 	int quantum[2];
@@ -268,14 +276,15 @@ int schedule(int pid, controlBlockStruct* controlBlock){
 		}
 	}
 	if(processNum == -1){
-		fprintf(stderr, "PROCESS NOT FOUND IN CONTROL BLOCK\n");
+		fprintf(stderr, "schedule: PROCESS NOT FOUND IN CONTROL BLOCK\n");
+		clean(1);
 		exit(1);
 	}
 
 	switch(randNum){
 		case 0:
 			controlBlock[processNum].task = 0;
-			return 0;
+			return 1;
 			break;
 		case 1:
 			controlBlock[processNum].quantum[0] = quantum[0];
@@ -288,6 +297,7 @@ int schedule(int pid, controlBlockStruct* controlBlock){
 			controlBlock[processNum].waitTime[0] = waitTime[0];
 			controlBlock[processNum].waitTime[1] = waitTime[1];
 			controlBlock[processNum].task = 2;
+			isReady(pid, 0, controlBlock);
 			break;
 		case 3:
 			controlBlock[processNum].p = p;
@@ -299,9 +309,74 @@ int schedule(int pid, controlBlockStruct* controlBlock){
 	return 0;
 }
 
-bool isReady(int pid, int q){
+bool isReady(int pid, int q, controlBlockStruct* controlBlock){
+	printf("\t\t\t\tIS READY\n");	
+	int i, j;
+	int averageWaitTime;
+	int totalTime;
+	int processCount = 0;
+	int processIds[19];
+	int processNum = -1;
+	
+	for(i = 0; i < 19; i++){
+		if(controlBlock[i].pid == pid){
+			processNum = i;
+			break;
+		}
+	}
+	if(processNum == -1){
+		fprintf(stderr, "isReady: PROCESS NOT FOUND IN CONTROL BLOCK\n");
+		clean(1);
+		exit(1);
+	}
 
-
+	switch(q){
+		case 0:
+			for(i = 0; i < 19; i++){
+				if(queue0[i] != -1){
+					processIds[i] = queue0[i];
+					for(j = 0; j < 19; j++){
+						if(controlBlock[j].pid == processIds[i]){
+							totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
+							processCount++;
+							break;
+						}
+					}
+				}else{
+					break;
+				}
+			}
+			printf("TOTAL TIME: %d\n", totalTime);
+			averageWaitTime = totalTime/processCount;
+			return 0;
+			if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > A * averageWaitTime)
+				return true;
+			else
+				return false;
+		break;
+	
+		case 1:
+			for(i = 0; i < 19; i++){
+				if(queue1[i] != -1){
+					processIds[i] = queue1[i];
+					for(j = 0; j < 19; j++){
+						if(controlBlock[j].pid == processIds[i]){
+							totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
+							processCount++;
+							break;
+						}
+					}
+				}else{
+					break;
+				}
+			}
+			averageWaitTime = totalTime/processCount;
+			if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > B * averageWaitTime)
+				return true;
+			else
+				return false;
+		break;
+	}
 
 	return 1;
 }
