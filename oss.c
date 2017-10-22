@@ -32,7 +32,15 @@ int processIds[100];
 int queue0[PROCESS_MAX];
 int queue1[PROCESS_MAX];
 int queue2[PROCESS_MAX];
-int front0, back0, front1, back1, front2, back2 = -1;
+int front0 = 0;
+int front1 = 0;
+int front2 = 0;
+int queue0Count = 0;
+int queue1Count = 0;
+int queue2Count = 0;
+int back0 = -1;
+int back1 = -1;
+int back2 = -1;
 
 union semun{
 	int val;
@@ -40,61 +48,103 @@ union semun{
 
 void schedule(int, controlBlockStruct*, FILE*);
 
-void update(int, int, controlBlockStruct*, FILE*);
+void update(int, int*, controlBlockStruct*, FILE*);
 
 void dispatch(controlBlockStruct*, int*, FILE*);
 
-void insert(int q, int pid){
-	if((q == 0 && front0 == 18) || (q == 1 && front1 == 18) || (q == 2 && front2 == 18)){
-		return;
+bool isQueue0Full(){
+	return queue0Count == 19;
+}
+
+bool isQueue0Empty(){
+	return queue0Count == 0;
+}
+
+bool isQueue1Full(){
+	return queue1Count == 19;
+}
+
+bool isQueue1Empty(){
+	return queue1Count == 0;
+}
+
+bool isQueue2Full(){
+	return queue2Count == 19;
+}
+
+bool isQueue2Empty(){
+	return queue2Count == 0;
+}
+
+int peek(int q){
+	switch(q){
+		case 0:
+			return queue0[front0];
+			break;
+		case 1:
+			return queue1[front1];
+			break;
+		case 2:
+			return queue2[front2];
+			break;
 	}
-	else{
-		switch (q){
-			case 0:
+}
+
+void insert(int q, int pid){
+	switch (q){
+		case 0:
+			if(!isQueue0Full()){
 				if(back0 == 18)
 					back0 = -1;
-				back0++;
-				queue0[back0] = pid;
-				break;
-			case 1:
+				queue0[++back0] = pid;
+				queue0Count++;
+			}
+			break;
+		case 1:
+			if(!isQueue1Full()){
 				if(back1 == 18)
 					back1 = -1;
-				back1++;
-				queue1[back1] = pid;
-				break;
-			case 2:
+				queue1[++back1] = pid;
+				queue1Count++;
+			}
+			break;
+		case 2:
+			if(!isQueue2Full()){
 				if(back2 == 18)
 					back2 = -1;
-				back2++;
-				queue2[back2] = pid;
-				break;
-		}
+				queue2[++back2] = pid;
+				queue2Count++;
+			}
+			break;
 	}
 }
 
 void delete(int q){
-	if((q == 0 && (front0 == -1 || front0 > back0)) || (q == 1 && (front1 == -1 || front1 > back1)) || (q == 2 && (front2 == -1 || front2 > back2))){
-		fprintf(stderr, "Queue is empty.\n");
-		return;
-	}
-	else{
-		switch(q){
-			case 0:
-				front0++;
+	switch(q){
+		case 0:
+			if(!isQueue0Empty()){
+				queue0[front0++] = -1;	
 				if(front0 == 19)
 					front0 = 0;
-				break;
-			case 1:
-				front1++;
+				queue0Count--;
+			}
+			break;
+		case 1:
+			if(!isQueue1Empty()){
+				queue1[front1++] = -1;
 				if(front1 == 19)
 					front1 = 0;
-				break;
-			case 2:
-				front2++;
+				queue1Count--;
+			}
+			break;
+		case 2:
+			if(!isQueue2Empty()){
+				queue2[front2++] = -1;
 				if(front2 == 19)
 					front2 = 0;
-				break;
-		}
+				queue2Count--;
+			}
+			break;
 	}
 }
 
@@ -122,8 +172,7 @@ void clean(int sig){
 	exit(1);
 }
 
-int main(int argc, char* argv[])  {
-
+int main(int argc, char* argv[]){
 	union semun arg;
 	arg.val = 1;
 	int i;
@@ -191,11 +240,8 @@ int main(int argc, char* argv[])  {
 	pid_t childpid;
 	srand(time(NULL));
 	forkTime = rand() % 3;
-	while(!tableFull){
+	while(1){
 		incrementTime = rand() % 1000;
-		printf("lastForkTime: %d\n", lastForkTime[0] + lastForkTime[1]);
-		printf("forkTime: %d\n", forkTime);
-		printf("incrementTime: %d\n", incrementTime);
 		clock[0] += 1;
 		if(clock[1] + incrementTime >= 1000000000){
 			clock[1] = (clock[1] + incrementTime) % 1000000000;
@@ -230,7 +276,9 @@ int main(int argc, char* argv[])  {
 					execl("./user", "user", arg, NULL);
 				} else {
 					controlBlock[i].pid = childpid;
-					insert(0, childpid);
+					controlBlock[i].q = 0;
+					controlBlock[i].waitTime[0] = clock[0];
+					controlBlock[i].waitTime[1] = clock[1];
 					schedule(childpid, controlBlock, file);
 					processIds[i] = childpid;
 					processCount++;
@@ -241,14 +289,21 @@ int main(int argc, char* argv[])  {
 				}
 			}
 		}
-		update(childpid, processCount, controlBlock, file);
+		update(processCount, clock, controlBlock, file);
 		dispatch(controlBlock, clock, file);
+
+		if(clock[0] > 100){
+			clean(1);
+			exit(1);
+		}
 	}
 	sleep(10);
 	fclose(file);
 	shmctl(memid, IPC_RMID, NULL);
 	shmctl(memid2, IPC_RMID, NULL);
 	semctl(semid, 0, IPC_RMID);
+
+
 
 	for(i = 0; i < processCount; i++)
 		kill(processIds[i], SIGKILL);
@@ -291,10 +346,8 @@ void schedule(int pid, controlBlockStruct* controlBlock, FILE* file){
 			controlBlock[processNum].task = 1;
 			break;
 		case 2:
-			waitTime[0] = r;
-			waitTime[1] = s;
-			controlBlock[processNum].waitTime[0] = waitTime[0];
-			controlBlock[processNum].waitTime[1] = waitTime[1];
+			controlBlock[processNum].r = r;
+			controlBlock[processNum].s = s;
 			controlBlock[processNum].task = 2;
 			break;
 		case 3:
@@ -307,7 +360,7 @@ void schedule(int pid, controlBlockStruct* controlBlock, FILE* file){
 	return;
 }
 
-void update(int pid, int pCount, controlBlockStruct* controlBlock, FILE *file){
+void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file){
 	int i, j, q;
 	int averageWaitTime = 0;
 	int totalTime = 0;
@@ -315,61 +368,84 @@ void update(int pid, int pCount, controlBlockStruct* controlBlock, FILE *file){
 	int processCount = 0;
 	int processNum = -1;
 	
-	for(i = 0; i < 19; i++){
-		if(controlBlock[i].pid == pid){
-			processNum = i;
-			break;
-		}
-	}
-	if(processNum == -1){
-		fprintf(stderr, "isReady: PROCESS NOT FOUND IN CONTROL BLOCK\n");
-		clean(1);
-		exit(1);
-	}
+//	for(i = 0; i < 19; i++){
+//		if(controlBlock[i].pid == pid){
+//			processNum = i;
+//			break;
+//		}
+//	}
+//	if(processNum == -1){
+//		fprintf(stderr, "isReady: PROCESS NOT FOUND IN CONTROL BLOCK\n");
+//		clean(1);
+//		exit(1);
+//	}
 
 	for(i = 0; i < pCount; i++){
 		q = controlBlock[i].q;
+		controlBlock[i].waitTime[0] = clock[0] - controlBlock[i].waitTime[0];
+		controlBlock[i].waitTime[1] = clock[1] - controlBlock[i].waitTime[1];
+		processNum = i;
 		switch(q){
 			case 0:
-				if(queue0[i] != -1){
-					processIds[i] = queue0[i];
+				if(peek(0) != -1){
+					processIds[i] = peek(0);
 					for(j = 0; j < pCount; j++){
-						if(controlBlock[j].pid == processIds[i]){
-							totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
+						//if(controlBlock[j].pid == processIds[i]){
+						//	totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
+						//	processCount++;
+						//	break;
+						//}
+						if(controlBlock[j].q == 1){
+							printf("\n\n\nHERE\n\n\n\n");
+							totalTime = totalTime + controlBlock[j].waitTime[0] + controlBlock[j].waitTime[1];
 							processCount++;
-							break;
 						}
+						else
+							break;
 					}
 				}else{
 					break;
 				}
-				averageWaitTime = totalTime/processCount;
-				return;
+				if(processCount > 0)
+					averageWaitTime = totalTime/processCount;
+				else
+					averageWaitTime = 0;
+				printf("WAIT TIME: %d.%d\n\n\n\n", controlBlock[processNum].waitTime[0], controlBlock[processNum].waitTime[1]);
 				if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > A * averageWaitTime){
+					fprintf(file, "OSS: Moving process with PID %d from queue 0 to queue 1 at time %d:%d\n", peek(0), clock[0], clock[1]);	
 					controlBlock[processNum].q = 1;
 					delete(0);
-					insert(1, pid);
+					insert(1, controlBlock[processNum].pid);
 				}
 			break;
 	
 			case 1:
-				if(queue1[i] != -1){
-					processIds[i] = queue1[i];
+				if(peek(1) != -1){
+					processIds[i] = peek(1);
 					for(j = 0; j < pCount; j++){
-						if(controlBlock[j].pid == processIds[i]){
-							totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
+						//if(controlBlock[j].pid == processIds[i]){
+						//	totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
+						//	processCount++;
+						//	break;
+						//}
+						if(controlBlock[j].q == 2){
+							totalTime = totalTime + controlBlock[j].waitTime[0] + controlBlock[j].waitTime[1];
 							processCount++;
-							break;
 						}
+						else
+							break;
 					}
 				}else{
 					break;
 				}
-				averageWaitTime = totalTime/processCount;
+				if(processCount > 0)
+					averageWaitTime = totalTime/processCount;
+				else
+					averageWaitTime = 0;
 				if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > B * averageWaitTime){
 					controlBlock[processNum].q = 2;
 					delete(1);
-					insert(2, pid);
+					insert(2, controlBlock[processNum].pid);
 				}
 			break;
 		}
@@ -379,27 +455,33 @@ void update(int pid, int pCount, controlBlockStruct* controlBlock, FILE *file){
 
 void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file){
 	int i;
-	if(queue0[0] != -1){
+	if(peek(0) != -1){
 		for(i = 0; i < 19; i++){
-			if(controlBlock[i].pid == queue0[0]){
+			if(controlBlock[i].pid == peek(0)){
 				controlBlock[i].ready = true;
-				fprintf(file, "OSS: Dispatching process with PID %d from queue 0 at time %d:%d\n", queue0[0], clock[0], clock[1]);
+				fprintf(file, "OSS: Dispatching process with PID %d from queue 0 at time %d:%d\n", peek(0), clock[0], clock[1]);
+				delete(0);
+				controlBlock[i].q = -1;
 				break;
 			}
 		}
-	}else if(queue1[0] != -1){
+	}else if(peek(1) != -1){
 		for(i = 0; i < 19; i++){
-			if(controlBlock[i].pid == queue1[0]){
+			if(controlBlock[i].pid == peek(1)){
 				controlBlock[i].ready = true;
-				fprintf(file, "OSS: Dispatching process with PID %d from queue 1 at time %d:%d\n", queue1[0], clock[0], clock[1]);
+				fprintf(file, "OSS: Dispatching process with PID %d from queue 1 at time %d:%d\n", peek(1), clock[0], clock[1]);
+				delete(1);
+				controlBlock[i].q = -1;
 				break;
 			}
 		}
-	}else if(queue2[0] != -1){
+	}else if(peek(2) != -1){
 		for(i = 0; i < 19; i++){
-			if(controlBlock[i].pid == queue2[0]){
+			if(controlBlock[i].pid == peek(2)){
 				controlBlock[i].ready = true;
-				fprintf(file, "OSS: Dispatching process with PID %d from queue 2 at time %d:%d\n", queue2[0], clock[0], clock[1]);
+				fprintf(file, "OSS: Dispatching process with PID %d from queue 2 at time %d:%d\n", peek(2), clock[0], clock[1]);
+				delete(2);
+				controlBlock[i].q = -1;
 				break;
 			}
 		}

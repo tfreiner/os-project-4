@@ -12,7 +12,7 @@
 #include "pcb.h"
 
 int main(int argc, char* argv[]){
-	printf("USER\n");
+	return 0;
 	srand(time(NULL));
 	int quantumUse = rand() % 2;
 	int pid = atoi(argv[1]);

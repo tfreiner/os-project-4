@@ -15,6 +15,8 @@ typedef struct controlBlockStruct{
 	int waitTime[2];
 	int q;
 	int p;
+	int r;
+	int s;
 	int task;
 	int quantum[2];
 	bool ready;
