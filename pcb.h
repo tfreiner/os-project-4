@@ -4,6 +4,8 @@
  * Log: Moving stucture to header file
  */
 
+#include <stdbool.h>
+
 typedef struct controlBlockStruct{
 	int pid;
 	int cpuTime;
@@ -15,4 +17,5 @@ typedef struct controlBlockStruct{
 	int p;
 	int task;
 	int quantum[2];
+	bool ready;
 }controlBlockStruct;

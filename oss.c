@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
- * Date: October 21st, 2017
- * Log: Adding to scheduler
+ * Date: October 22nd, 2017
+ * Log: Fixing queues
  */
 
 #include <stdio.h>
@@ -38,28 +38,33 @@ union semun{
 	int val;
 };
 
+void schedule(int, controlBlockStruct*, FILE*);
+
+void update(int, int, controlBlockStruct*, FILE*);
+
+void dispatch(controlBlockStruct*, int*, FILE*);
+
 void insert(int q, int pid){
 	if((q == 0 && front0 == 18) || (q == 1 && front1 == 18) || (q == 2 && front2 == 18)){
-		fprintf(stderr, "Queue is full.\n");
 		return;
 	}
 	else{
 		switch (q){
 			case 0:
-				if(q == 0 && front0 == -1)
-					front0 = 0;
+				if(back0 == 18)
+					back0 = -1;
 				back0++;
 				queue0[back0] = pid;
 				break;
 			case 1:
-				if(q == 1 && front1 == -1)
-					front1 = 0;
+				if(back1 == 18)
+					back1 = -1;
 				back1++;
 				queue1[back1] = pid;
 				break;
 			case 2:
-				if(q == 2 && front2 == -1)
-					front2 = 0;
+				if(back2 == 18)
+					back2 = -1;
 				back2++;
 				queue2[back2] = pid;
 				break;
@@ -67,7 +72,7 @@ void insert(int q, int pid){
 	}
 }
 
-void delete(int q, int pid){
+void delete(int q){
 	if((q == 0 && (front0 == -1 || front0 > back0)) || (q == 1 && (front1 == -1 || front1 > back1)) || (q == 2 && (front2 == -1 || front2 > back2))){
 		fprintf(stderr, "Queue is empty.\n");
 		return;
@@ -76,20 +81,23 @@ void delete(int q, int pid){
 		switch(q){
 			case 0:
 				front0++;
+				if(front0 == 19)
+					front0 = 0;
 				break;
 			case 1:
 				front1++;
+				if(front1 == 19)
+					front1 = 0;
 				break;
 			case 2:
 				front2++;
+				if(front2 == 19)
+					front2 = 0;
 				break;
 		}
 	}
 }
 
-int schedule(int, controlBlockStruct*, int*);
-
-bool isReady(int, int, controlBlockStruct*);
 void setBit(int bitArray[], int i){
 	bitArray[i/BIT_COUNT] |= 1 << (i % BIT_COUNT);
 }
@@ -121,7 +129,9 @@ int main(int argc, char* argv[])  {
 	int i;
 	int bitArray[1] = { 0 };
 	bool tableFull = 0;
+	int processCount = 0;
 	controlBlockStruct* controlBlock;
+
 	//SIGNAL HANDLING
 	signal(SIGINT, clean);
 
@@ -143,16 +153,16 @@ int main(int argc, char* argv[])  {
 	int semid = semget(key3, 1, IPC_CREAT | 0644);
 	if(memid == -1 || memid2 == -1){
 		printf("%s: ", argv[0]);
-		perror("Error\n");
+		perror("Error: \n");
 	}
 	sharedmem[0] = memid;
 	sharedmem[1] = memid2;
 	sharedmem[2] = semid;
 	int *clock = (int *)shmat(memid, NULL, 0);
-	controlBlock = (controlBlockStruct *)shmat(memid2, NULL, 0);
+	controlBlock = (struct controlBlockStruct *)shmat(memid2, NULL, 0);
 	if(*clock == -1 || (int*)controlBlock == (int*)-1){
 		printf("%s: ", argv[0]);
-		perror("Error\n");
+		perror("Error: \n");
 	}
 	int clockVal = 0;
 	for(i = 0; i < 2; i++){
@@ -206,7 +216,6 @@ int main(int argc, char* argv[])  {
 				tableFull = 1;
 			}
 			if(!tableFull){
-				printf("TABLE NOT FULL\n");
 				childpid = fork();
 				if(errno){
 					fprintf(stderr, "%s", strerror(errno));
@@ -222,20 +231,18 @@ int main(int argc, char* argv[])  {
 				} else {
 					controlBlock[i].pid = childpid;
 					insert(0, childpid);
-					int num = schedule(childpid, controlBlock, clock);
+					schedule(childpid, controlBlock, file);
+					processIds[i] = childpid;
+					processCount++;
 				}
 				if(errno){
 					fprintf(stderr, "%s\n", strerror(errno));
 					exit(1);
 				}
-				//if(num == 1)
-				//	printf("END PROCESS\n\n\n");
-				//else{
-				//	processIds[i] = childpid;
-				//	processCount++;
-				//}
 			}
 		}
+		update(childpid, processCount, controlBlock, file);
+		dispatch(controlBlock, clock, file);
 	}
 	sleep(10);
 	fclose(file);
@@ -249,8 +256,7 @@ int main(int argc, char* argv[])  {
 	return 0;
 }
 
-int schedule(int pid, controlBlockStruct* controlBlock, int *clock){
-	printf("SCHEDULE\n");
+void schedule(int pid, controlBlockStruct* controlBlock, FILE* file){
 	int i;
 	int waitTime[2];
 	int quantum[2];
@@ -277,7 +283,7 @@ int schedule(int pid, controlBlockStruct* controlBlock, int *clock){
 	switch(randNum){
 		case 0:
 			controlBlock[processNum].task = 0;
-			return 1;
+			return;
 			break;
 		case 1:
 			controlBlock[processNum].quantum[0] = quantum[0];
@@ -290,7 +296,6 @@ int schedule(int pid, controlBlockStruct* controlBlock, int *clock){
 			controlBlock[processNum].waitTime[0] = waitTime[0];
 			controlBlock[processNum].waitTime[1] = waitTime[1];
 			controlBlock[processNum].task = 2;
-			isReady(pid, 0, controlBlock);
 			break;
 		case 3:
 			controlBlock[processNum].p = p;
@@ -299,22 +304,20 @@ int schedule(int pid, controlBlockStruct* controlBlock, int *clock){
 			break;
 	}
 
-	return 0;
+	return;
 }
 
-bool isReady(int pid, int q, controlBlockStruct* controlBlock){
-	printf("IS READY: PID: %d\n", pid);	
-	int i, j;
+void update(int pid, int pCount, controlBlockStruct* controlBlock, FILE *file){
+	int i, j, q;
 	int averageWaitTime = 0;
 	int totalTime = 0;
-	int processCount = 0;
 	int processIds[19];
+	int processCount = 0;
 	int processNum = -1;
 	
 	for(i = 0; i < 19; i++){
 		if(controlBlock[i].pid == pid){
 			processNum = i;
-			printf("PROCESS NUM----------: %d", processNum);
 			break;
 		}
 	}
@@ -324,13 +327,13 @@ bool isReady(int pid, int q, controlBlockStruct* controlBlock){
 		exit(1);
 	}
 
-	switch(q){
-		case 0:
-			for(i = 0; i < 19; i++){
+	for(i = 0; i < pCount; i++){
+		q = controlBlock[i].q;
+		switch(q){
+			case 0:
 				if(queue0[i] != -1){
 					processIds[i] = queue0[i];
-					printf("ID IN Q: %d\n", queue0[i]);
-					for(j = 0; j < 19; j++){
+					for(j = 0; j < pCount; j++){
 						if(controlBlock[j].pid == processIds[i]){
 							totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
 							processCount++;
@@ -340,22 +343,19 @@ bool isReady(int pid, int q, controlBlockStruct* controlBlock){
 				}else{
 					break;
 				}
-			}
-			printf("TOTAL TIME: %d\n", totalTime);
-			printf("PROCESS COUNT: %d\n", processCount);
-			averageWaitTime = totalTime/processCount;
-			return 0;
-			if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > A * averageWaitTime)
-				return true;
-			else
-				return false;
-		break;
+				averageWaitTime = totalTime/processCount;
+				return;
+				if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > A * averageWaitTime){
+					controlBlock[processNum].q = 1;
+					delete(0);
+					insert(1, pid);
+				}
+			break;
 	
-		case 1:
-			for(i = 0; i < 19; i++){
+			case 1:
 				if(queue1[i] != -1){
 					processIds[i] = queue1[i];
-					for(j = 0; j < 19; j++){
+					for(j = 0; j < pCount; j++){
 						if(controlBlock[j].pid == processIds[i]){
 							totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
 							processCount++;
@@ -365,14 +365,43 @@ bool isReady(int pid, int q, controlBlockStruct* controlBlock){
 				}else{
 					break;
 				}
-			}
-			averageWaitTime = totalTime/processCount;
-			if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > B * averageWaitTime)
-				return true;
-			else
-				return false;
-		break;
+				averageWaitTime = totalTime/processCount;
+				if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > B * averageWaitTime){
+					controlBlock[processNum].q = 2;
+					delete(1);
+					insert(2, pid);
+				}
+			break;
+		}
+		return;
 	}
+}
 
-	return 1;
+void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file){
+	int i;
+	if(queue0[0] != -1){
+		for(i = 0; i < 19; i++){
+			if(controlBlock[i].pid == queue0[0]){
+				controlBlock[i].ready = true;
+				fprintf(file, "OSS: Dispatching process with PID %d from queue 0 at time %d:%d\n", queue0[0], clock[0], clock[1]);
+				break;
+			}
+		}
+	}else if(queue1[0] != -1){
+		for(i = 0; i < 19; i++){
+			if(controlBlock[i].pid == queue1[0]){
+				controlBlock[i].ready = true;
+				fprintf(file, "OSS: Dispatching process with PID %d from queue 1 at time %d:%d\n", queue1[0], clock[0], clock[1]);
+				break;
+			}
+		}
+	}else if(queue2[0] != -1){
+		for(i = 0; i < 19; i++){
+			if(controlBlock[i].pid == queue2[0]){
+				controlBlock[i].ready = true;
+				fprintf(file, "OSS: Dispatching process with PID %d from queue 2 at time %d:%d\n", queue2[0], clock[0], clock[1]);
+				break;
+			}
+		}
+	}
 }
