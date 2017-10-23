@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
- * Date: October 22nd, 2017
- * Log: Fixing queues
+ * Date: October 23rd, 2017
+ * Log: Moving update/dispatch calls to beginning of loop
  */
 
 #include <stdio.h>
@@ -88,6 +88,7 @@ int peek(int q){
 			return queue2[front2];
 			break;
 	}
+	return -1;
 }
 
 void insert(int q, int pid){
@@ -161,7 +162,8 @@ bool checkBit(int bitArray[], int i){
 }
 
 void clean(int sig){
-	fprintf(stderr, "Interrupt signaled. Removing shared memory and killing processes.\n");
+	if(sig != 1)
+		fprintf(stderr, "Interrupt signaled. Removing shared memory and killing processes.\n");
 	int i;
 	shmctl(sharedmem[0], IPC_RMID, NULL);
 	shmctl(sharedmem[1], IPC_RMID, NULL);
@@ -235,6 +237,7 @@ int main(int argc, char* argv[]){
 	int forkTime;
 	int incrementTime;
 	int lastForkTime[2];
+	int processIndex = 0;
 	lastForkTime[0] = clock[0];
 	lastForkTime[1] = clock[1];
 	pid_t childpid;
@@ -249,6 +252,10 @@ int main(int argc, char* argv[]){
 		}
 		else
 			clock[1] += incrementTime;
+		if(processCount > 0){
+			update(processCount, clock, controlBlock, file);
+			dispatch(controlBlock, clock, file);		
+		}
 		if(((clock[0] * 1000000000 + clock[1]) - (lastForkTime[0] * 1000000000 + lastForkTime[1]) > (forkTime * 1000000000))){
 			lastForkTime[0] = clock[0];
 			lastForkTime[1] = clock[1];
@@ -275,13 +282,14 @@ int main(int argc, char* argv[]){
 					sprintf(arg, "%d", childpid);
 					execl("./user", "user", arg, NULL);
 				} else {
-					controlBlock[i].pid = childpid;
-					controlBlock[i].q = 0;
-					controlBlock[i].waitTime[0] = clock[0];
-					controlBlock[i].waitTime[1] = clock[1];
+					controlBlock[processIndex].pid = childpid;
+					controlBlock[processIndex].q = 0;
+					controlBlock[processIndex].startTime[0] = clock[0];
+					controlBlock[i].startTime[1] = clock[1];
 					schedule(childpid, controlBlock, file);
-					processIds[i] = childpid;
+					processIds[processIndex] = childpid;
 					processCount++;
+					processIndex++;
 				}
 				if(errno){
 					fprintf(stderr, "%s\n", strerror(errno));
@@ -289,8 +297,6 @@ int main(int argc, char* argv[]){
 				}
 			}
 		}
-		update(processCount, clock, controlBlock, file);
-		dispatch(controlBlock, clock, file);
 
 		if(clock[0] > 100){
 			clean(1);
@@ -298,22 +304,16 @@ int main(int argc, char* argv[]){
 		}
 	}
 	sleep(10);
+	
 	fclose(file);
-	shmctl(memid, IPC_RMID, NULL);
-	shmctl(memid2, IPC_RMID, NULL);
-	semctl(semid, 0, IPC_RMID);
 
-
-
-	for(i = 0; i < processCount; i++)
-		kill(processIds[i], SIGKILL);
-
+	clean(1);
+	
 	return 0;
 }
 
 void schedule(int pid, controlBlockStruct* controlBlock, FILE* file){
 	int i;
-	int waitTime[2];
 	int quantum[2];
 	quantum[0] = 2;
 	quantum[1] = 5000;
@@ -338,7 +338,6 @@ void schedule(int pid, controlBlockStruct* controlBlock, FILE* file){
 	switch(randNum){
 		case 0:
 			controlBlock[processNum].task = 0;
-			return;
 			break;
 		case 1:
 			controlBlock[processNum].quantum[0] = quantum[0];
@@ -354,6 +353,7 @@ void schedule(int pid, controlBlockStruct* controlBlock, FILE* file){
 			controlBlock[processNum].p = p;
 			controlBlock[processNum].quantum[0] = quantum[0];
 			controlBlock[processNum].quantum[1] = quantum[1];
+			controlBlock[processNum].task = 3;
 			break;
 	}
 
@@ -382,8 +382,9 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 
 	for(i = 0; i < pCount; i++){
 		q = controlBlock[i].q;
-		controlBlock[i].waitTime[0] = clock[0] - controlBlock[i].waitTime[0];
-		controlBlock[i].waitTime[1] = clock[1] - controlBlock[i].waitTime[1];
+	
+		controlBlock[i].waitTime[0] = clock[0] - controlBlock[i].startTime[0];
+		controlBlock[i].waitTime[1] = clock[1] - controlBlock[i].startTime[1];
 		processNum = i;
 		switch(q){
 			case 0:
@@ -396,12 +397,9 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 						//	break;
 						//}
 						if(controlBlock[j].q == 1){
-							printf("\n\n\nHERE\n\n\n\n");
 							totalTime = totalTime + controlBlock[j].waitTime[0] + controlBlock[j].waitTime[1];
 							processCount++;
 						}
-						else
-							break;
 					}
 				}else{
 					break;
@@ -410,14 +408,13 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 					averageWaitTime = totalTime/processCount;
 				else
 					averageWaitTime = 0;
-				printf("WAIT TIME: %d.%d\n\n\n\n", controlBlock[processNum].waitTime[0], controlBlock[processNum].waitTime[1]);
 				if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > A * averageWaitTime){
 					fprintf(file, "OSS: Moving process with PID %d from queue 0 to queue 1 at time %d:%d\n", peek(0), clock[0], clock[1]);	
 					controlBlock[processNum].q = 1;
 					delete(0);
 					insert(1, controlBlock[processNum].pid);
 				}
-			break;
+				break;
 	
 			case 1:
 				if(peek(1) != -1){
@@ -432,8 +429,6 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 							totalTime = totalTime + controlBlock[j].waitTime[0] + controlBlock[j].waitTime[1];
 							processCount++;
 						}
-						else
-							break;
 					}
 				}else{
 					break;
@@ -447,9 +442,8 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 					delete(1);
 					insert(2, controlBlock[processNum].pid);
 				}
-			break;
+				break;
 		}
-		return;
 	}
 }
 
