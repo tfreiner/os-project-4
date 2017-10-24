@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
- * Date: October 23rd, 2017
- * Log: Fixing issues with update times
+ * Date: October 24th, 2017
+ * Log: Implementing semaphore
  */
 
 #include <stdio.h>
@@ -473,6 +473,12 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file){
 	int i, j;
 	bool dispatch = true;
+
+	sb.sem_op = 1;
+	sb.sem_num = 0;
+	sb.sem_flg = 0;
+	semop(semid, &sb, 1);	
+
 	if(peek(0) != -1){
 		for(i = 0; i < 19; i++){
 			if(controlBlock[i].pid == peek(0)){
@@ -531,4 +537,7 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file){
 			}
 		}
 	}
+
+	sb.sem_op = -1;                  
+	semop(semid, &sb, 1);
 }
