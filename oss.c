@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
  * Date: October 23rd, 2017
- * Log: Moving update/dispatch calls to beginning of loop
+ * Log: Fixing issues with update times
  */
 
 #include <stdio.h>
@@ -19,10 +19,12 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <math.h>
 #include "pcb.h"
 
 #define BIT_COUNT 32
 #define PROCESS_MAX 19
+#define THRESHOLD 5000000000
 #define A 2
 #define B 4
 
@@ -362,8 +364,8 @@ void schedule(int pid, controlBlockStruct* controlBlock, FILE* file){
 
 void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file){
 	int i, j, q;
-	int averageWaitTime = 0;
-	int totalTime = 0;
+	int averageWaitTime[2][2];
+	int totalTime[3][2];
 	int processIds[19];
 	int processCount = 0;
 	int processNum = -1;
@@ -397,18 +399,29 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 						//	break;
 						//}
 						if(controlBlock[j].q == 1){
-							totalTime = totalTime + controlBlock[j].waitTime[0] + controlBlock[j].waitTime[1];
+							totalTime[0][0] = totalTime[0][0] + controlBlock[j].waitTime[0];
+							if((totalTime[0][1] + controlBlock[j].waitTime[1]) > 1000000000){
+								totalTime[0][1] = (totalTime[0][1] + controlBlock[j].waitTime[1] % 1000000000);
+								totalTime[0][0]++;
+							}
+							else
+								totalTime[0][1] = (totalTime[0][1] + controlBlock[j].waitTime[1]);
 							processCount++;
 						}
 					}
 				}else{
 					break;
 				}
-				if(processCount > 0)
-					averageWaitTime = totalTime/processCount;
-				else
-					averageWaitTime = 0;
-				if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > A * averageWaitTime){
+				if(processCount > 0){
+					averageWaitTime[0][0] = totalTime[0][0]/processCount;
+					averageWaitTime[0][1] = totalTime[0][1]/processCount;
+				}
+				else{
+					averageWaitTime[0][0] = 0;
+					averageWaitTime[0][1] = 0;
+				}
+				if(((controlBlock[processNum].waitTime[0] > A * averageWaitTime[0][0]) || (controlBlock[processNum].waitTime[0] == A * averageWaitTime[0][0] &&
+						controlBlock[processNum].waitTime[1] > averageWaitTime[0][1])) && (controlBlock[processNum].waitTime[0] >= 5)){
 					fprintf(file, "OSS: Moving process with PID %d from queue 0 to queue 1 at time %d:%d\n", peek(0), clock[0], clock[1]);	
 					controlBlock[processNum].q = 1;
 					delete(0);
@@ -426,18 +439,28 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 						//	break;
 						//}
 						if(controlBlock[j].q == 2){
-							totalTime = totalTime + controlBlock[j].waitTime[0] + controlBlock[j].waitTime[1];
+							totalTime[1][0] = totalTime[1][0] + controlBlock[j].waitTime[0];
+							if((totalTime[1][1] + controlBlock[j].waitTime[1]) > 1000000000){
+								totalTime[1][1] = (totalTime[1][1] + controlBlock[j].waitTime[1] % 1000000000);
+								totalTime[1][0]++;
+							}
+							else
+								totalTime[1][1] = (totalTime[1][1] + controlBlock[j].waitTime[1]);
 							processCount++;
 						}
 					}
 				}else{
 					break;
 				}
-				if(processCount > 0)
-					averageWaitTime = totalTime/processCount;
-				else
-					averageWaitTime = 0;
-				if((controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1]) > B * averageWaitTime){
+				if(processCount > 0){
+					averageWaitTime[1][0] = totalTime[1][0]/processCount;
+					averageWaitTime[1][1] = totalTime[1][1]/processCount;
+				}else{
+					averageWaitTime[1][0] = 0;
+					averageWaitTime[1][1] = 0;
+				}
+				if(((controlBlock[processNum].waitTime[0] > B * averageWaitTime[1][0]) || (controlBlock[processNum].waitTime[0] == B * averageWaitTime[1][0] &&
+						controlBlock[processNum].waitTime[1] > averageWaitTime[0][1])) && (controlBlock[processNum].waitTime[0] >= 5)){
 					controlBlock[processNum].q = 2;
 					delete(1);
 					insert(2, controlBlock[processNum].pid);
@@ -448,34 +471,62 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 }
 
 void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file){
-	int i;
+	int i, j;
+	bool dispatch = true;
 	if(peek(0) != -1){
 		for(i = 0; i < 19; i++){
 			if(controlBlock[i].pid == peek(0)){
-				controlBlock[i].ready = true;
-				fprintf(file, "OSS: Dispatching process with PID %d from queue 0 at time %d:%d\n", peek(0), clock[0], clock[1]);
-				delete(0);
-				controlBlock[i].q = -1;
+				for(j = 0; j < 19; j++){
+					if(controlBlock[j].ready == true){
+						dispatch = false;
+						break;
+					}
+				}
+				if(dispatch){
+					controlBlock[i].ready = true;
+					fprintf(file, "OSS: Dispatching process with PID %d from queue 0 at time %d:%d\n", peek(0), clock[0], clock[1]);
+					delete(0);
+					controlBlock[i].q = -1;
+					break;
+				}
 				break;
 			}
 		}
 	}else if(peek(1) != -1){
 		for(i = 0; i < 19; i++){
 			if(controlBlock[i].pid == peek(1)){
-				controlBlock[i].ready = true;
-				fprintf(file, "OSS: Dispatching process with PID %d from queue 1 at time %d:%d\n", peek(1), clock[0], clock[1]);
-				delete(1);
-				controlBlock[i].q = -1;
+				for(j = 0; j < 19; j++){
+					if(controlBlock[j].ready == true){
+						dispatch = false;
+						break;
+					}
+				}
+				if(dispatch){
+					controlBlock[i].ready = true;
+					fprintf(file, "OSS: Dispatching process with PID %d from queue 1 at time %d:%d\n", peek(1), clock[0], clock[1]);
+					delete(1);
+					controlBlock[i].q = -1;
+					break;
+				}
 				break;
 			}
 		}
 	}else if(peek(2) != -1){
 		for(i = 0; i < 19; i++){
 			if(controlBlock[i].pid == peek(2)){
-				controlBlock[i].ready = true;
-				fprintf(file, "OSS: Dispatching process with PID %d from queue 2 at time %d:%d\n", peek(2), clock[0], clock[1]);
-				delete(2);
-				controlBlock[i].q = -1;
+				for(j = 0; j < 19; j++){
+					if(controlBlock[j].ready == true){
+						dispatch = false;
+						break;
+					}
+				}
+				if(dispatch){
+					controlBlock[i].ready = true;
+					fprintf(file, "OSS: Dispatching process with PID %d from queue 2 at time %d:%d\n", peek(2), clock[0], clock[1]);
+					delete(2);
+					controlBlock[i].q = -1;
+					break;
+				}
 				break;
 			}
 		}
