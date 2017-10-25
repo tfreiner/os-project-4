@@ -44,7 +44,7 @@ int main(int argc, char* argv[]){
 	if(quantumUse == 1){
 		quantumLength[0] = rand() % controlBlock[processIndex].quantum[0] + 1;
 		quantumLength[1] = rand() % controlBlock[processIndex].quantum[1] + 1;
-	} else {
+	}else{
 		quantumLength[0] = controlBlock[processIndex].quantum[0];
 		quantumLength[1] = controlBlock[processIndex].quantum[1];
 	}

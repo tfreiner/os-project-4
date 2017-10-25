@@ -24,7 +24,7 @@
 
 #define BIT_COUNT 32
 #define PROCESS_MAX 19
-#define THRESHOLD 1000000000
+#define THRESHOLD 1
 #define A 2
 #define B 4
 
@@ -296,7 +296,7 @@ int main(int argc, char* argv[]){
 					char arg[12];
 					sprintf(arg, "%d", processIndex);
 					execl("./user", "user", arg, NULL);
-				} else {
+				}else{
 					controlBlock[processIndex].pid = childpid;
 					controlBlock[processIndex].q = 0;
 					controlBlock[processIndex].startTime[0] = clock[0];
@@ -318,10 +318,9 @@ int main(int argc, char* argv[]){
 			exit(1);
 		}
 	}
-	sleep(10);
-	
-	fclose(file);
 
+	sleep(10);
+	fclose(file);
 	clean(1);
 	
 	return 0;
@@ -417,7 +416,7 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 					averageWaitTime[0][1] = 0;
 				}
 				if(((controlBlock[processNum].waitTime[0] > A * averageWaitTime[0][0]) || (controlBlock[processNum].waitTime[0] == A * averageWaitTime[0][0] &&
-						controlBlock[processNum].waitTime[1] > averageWaitTime[0][1])) && (controlBlock[processNum].waitTime[0] >= 1)){
+						controlBlock[processNum].waitTime[1] > averageWaitTime[0][1])) && (controlBlock[processNum].waitTime[0] >= THRESHOLD)){
 					fprintf(file, "OSS: Moving process with PID %d from queue 0 to queue 1 at time %d:%d\n", peek(0), clock[0], clock[1]);	
 					controlBlock[processNum].q = 1;
 					delete(0);
@@ -451,7 +450,7 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 					averageWaitTime[1][1] = 0;
 				}
 				if(((controlBlock[processNum].waitTime[0] > B * averageWaitTime[1][0]) || (controlBlock[processNum].waitTime[0] == B * averageWaitTime[1][0] &&
-						controlBlock[processNum].waitTime[1] > averageWaitTime[0][1])) && (controlBlock[processNum].waitTime[0] >= 5)){
+						controlBlock[processNum].waitTime[1] > averageWaitTime[0][1])) && (controlBlock[processNum].waitTime[0] >= THRESHOLD)){
 					fprintf(file, "OSS: Moving process with PID %d from queue 1 to queue 2 at time %d:%d\n", peek(0), clock[0], clock[1]);
 					controlBlock[processNum].q = 2;
 					delete(1);
