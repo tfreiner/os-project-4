@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
  * Date: October 24th, 2017
- * Log: Implementing semaphore
+ * Log: Fixing semaphore issues
  */
 
 #include <stdio.h>
@@ -28,6 +28,7 @@
 #define A 2
 #define B 4
 
+struct sembuf sb;
 int sharedmem[3];
 int processCount = 0;
 int processIds[100];
@@ -52,7 +53,7 @@ void schedule(int, controlBlockStruct*, FILE*);
 
 void update(int, int*, controlBlockStruct*, FILE*);
 
-void dispatch(controlBlockStruct*, int*, FILE*);
+void dispatch(controlBlockStruct*, int*, FILE*, int);
 
 bool isQueue0Full(){
 	return queue0Count == 19;
@@ -223,6 +224,10 @@ int main(int argc, char* argv[]){
 	}
 	
 	semctl(semid, 0, SETVAL, 1, arg);
+	sb.sem_op = 1;
+	sb.sem_num = 0;
+	sb.sem_flg = 0;
+	semop(semid, &sb, 1);
 	if(errno){
 		fprintf(stderr, "%s\n", strerror(errno));
 		exit(1);
@@ -256,7 +261,7 @@ int main(int argc, char* argv[]){
 			clock[1] += incrementTime;
 		if(processCount > 0){
 			update(processCount, clock, controlBlock, file);
-			dispatch(controlBlock, clock, file);		
+			dispatch(controlBlock, clock, file, semid);		
 		}
 		if(((clock[0] * 1000000000 + clock[1]) - (lastForkTime[0] * 1000000000 + lastForkTime[1]) > (forkTime * 1000000000))){
 			lastForkTime[0] = clock[0];
@@ -281,7 +286,7 @@ int main(int argc, char* argv[]){
 		
 				if(childpid == 0){
 					char arg[12];
-					sprintf(arg, "%d", childpid);
+					sprintf(arg, "%d", processIndex);
 					execl("./user", "user", arg, NULL);
 				} else {
 					controlBlock[processIndex].pid = childpid;
@@ -400,7 +405,7 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 						//}
 						if(controlBlock[j].q == 1){
 							totalTime[0][0] = totalTime[0][0] + controlBlock[j].waitTime[0];
-							if((totalTime[0][1] + controlBlock[j].waitTime[1]) > 1000000000){
+							if((totalTime[0][1] + controlBlock[j].waitTime[1]) >= 1000000000){
 								totalTime[0][1] = (totalTime[0][1] + controlBlock[j].waitTime[1] % 1000000000);
 								totalTime[0][0]++;
 							}
@@ -440,7 +445,7 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 						//}
 						if(controlBlock[j].q == 2){
 							totalTime[1][0] = totalTime[1][0] + controlBlock[j].waitTime[0];
-							if((totalTime[1][1] + controlBlock[j].waitTime[1]) > 1000000000){
+							if((totalTime[1][1] + controlBlock[j].waitTime[1]) >= 1000000000){
 								totalTime[1][1] = (totalTime[1][1] + controlBlock[j].waitTime[1] % 1000000000);
 								totalTime[1][0]++;
 							}
@@ -461,6 +466,7 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 				}
 				if(((controlBlock[processNum].waitTime[0] > B * averageWaitTime[1][0]) || (controlBlock[processNum].waitTime[0] == B * averageWaitTime[1][0] &&
 						controlBlock[processNum].waitTime[1] > averageWaitTime[0][1])) && (controlBlock[processNum].waitTime[0] >= 5)){
+					fprintf(file, "OSS: Moving process with PID %d from queue 1 to queue 2 at time %d:%d\n", peek(0), clock[0], clock[1]);
 					controlBlock[processNum].q = 2;
 					delete(1);
 					insert(2, controlBlock[processNum].pid);
@@ -470,14 +476,10 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 	}
 }
 
-void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file){
+void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semid){
 	int i, j;
 	bool dispatch = true;
-
-	sb.sem_op = 1;
-	sb.sem_num = 0;
-	sb.sem_flg = 0;
-	semop(semid, &sb, 1);	
+	bool done = false;
 
 	if(peek(0) != -1){
 		for(i = 0; i < 19; i++){
@@ -490,9 +492,14 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file){
 				}
 				if(dispatch){
 					controlBlock[i].ready = true;
-					fprintf(file, "OSS: Dispatching process with PID %d from queue 0 at time %d:%d\n", peek(0), clock[0], clock[1]);
+					fprintf(file, "OSS: Dispatching process with PID %d from queue 0 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					delete(0);
 					controlBlock[i].q = -1;
+					sb.sem_op = -1;
+					sb.sem_num = 0;
+					sb.sem_flg = 0;
+					semop(semid, &sb, 1);
+					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
 					break;
 				}
 				break;
@@ -537,7 +544,4 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file){
 			}
 		}
 	}
-
-	sb.sem_op = -1;                  
-	semop(semid, &sb, 1);
 }

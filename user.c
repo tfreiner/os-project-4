@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
  * Date: October 24th, 2017
- * Log: Adding semaphore
+ * Log: Fixing semaphore issues 
  */
 
 #include <stdio.h>
@@ -19,7 +19,7 @@ int main(int argc, char* argv[]){
 	srand(time(NULL));
 	int quantumUse = rand() % 2;
 	int quantumLength[2];
-	int pid = atoi(argv[1]);
+	int index = atoi(argv[1]);
 	int i;
 	int processIndex = -1;
 	controlBlockStruct* controlBlock;
@@ -36,37 +36,25 @@ int main(int argc, char* argv[]){
 	int *clock = (int *)shmat(memid, NULL, 0);	
 	controlBlock = (controlBlockStruct *)shmat (memid2, NULL, 0);
 
-	sb.sem_op = -1;
+	while(!ready){
+		if(controlBlock[index].ready){
+			printf("PROCESS %d READY\n", controlBlock[index].pid);
+			ready = true;
+		}
+	}
+	if(quantumUse == 1){
+		quantumLength[0] = rand() % controlBlock[processIndex].quantum[0] + 1;
+		quantumLength[1] = rand() % controlBlock[processIndex].quantum[1] + 1;
+	} else {
+		quantumLength[0] = controlBlock[processIndex].quantum[0];
+		quantumLength[1] = controlBlock[processIndex].quantum[1];
+	}
+	controlBlock[index].ready = false;
+
+	printf("SET BACK\n");
+	sb.sem_op = 1;
 	sb.sem_num = 0;
 	sb.sem_flg = 0;
-	semop(semid, &sb, 1);	
-	
-	for(i = 0; i < 19; i++){
-		if(controlBlock[i].pid == getpid()){
-			processIndex = i;
-			break;
-		}
-	}
-	if(processIndex == -1){
-		fprintf("USER: process not found\n");
-		exit(1);
-	}
-	if(controlBlock[processIndex].ready) {
-
-		if(quantumUse == 1){
-			quantumLength[0] = rand() % controlBlock[processIndex].quantum[0] + 1;
-			quantumLenght[1] = rand() % controlBlock[processIndex].quantum[1] + 1;
-		} else {
-			quantumLength[0] = controlBlock[processIndex].quantum[0];
-			quantumLength[1] = controlBlock[processIndex].quantum[1];
-		}
-	} else {
-
-		//reject signal
-
-	}
-		
-	sb.sem_op = 1;
 	semop(semid, &sb, 1);
 
 	return 0;
