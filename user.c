@@ -38,7 +38,6 @@ int main(int argc, char* argv[]){
 
 	while(!ready){
 		if(controlBlock[index].ready){
-			printf("PROCESS %d READY\n", controlBlock[index].pid);
 			ready = true;
 		}
 	}
@@ -51,7 +50,6 @@ int main(int argc, char* argv[]){
 	}
 	controlBlock[index].ready = false;
 
-	printf("SET BACK\n");
 	sb.sem_op = 1;
 	sb.sem_num = 0;
 	sb.sem_flg = 0;

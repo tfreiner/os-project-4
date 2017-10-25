@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
  * Date: October 24th, 2017
- * Log: Fixing semaphore issues
+ * Log: Handling removing and forking new processes 
  */
 
 #include <stdio.h>
@@ -24,7 +24,7 @@
 
 #define BIT_COUNT 32
 #define PROCESS_MAX 19
-#define THRESHOLD 5000000000
+#define THRESHOLD 1000000000
 #define A 2
 #define B 4
 
@@ -263,6 +263,14 @@ int main(int argc, char* argv[]){
 			update(processCount, clock, controlBlock, file);
 			dispatch(controlBlock, clock, file, semid);		
 		}
+		for(i = 0 ; i < 19; i++){
+			if(controlBlock[i].pid == -2 && processCount == 19){
+				unsetBit(bitArray, i);
+				processCount--;
+				processIndex = i;
+				break;
+			}
+		}
 		if(((clock[0] * 1000000000 + clock[1]) - (lastForkTime[0] * 1000000000 + lastForkTime[1]) > (forkTime * 1000000000))){
 			lastForkTime[0] = clock[0];
 			lastForkTime[1] = clock[1];
@@ -375,18 +383,6 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 	int processCount = 0;
 	int processNum = -1;
 	
-//	for(i = 0; i < 19; i++){
-//		if(controlBlock[i].pid == pid){
-//			processNum = i;
-//			break;
-//		}
-//	}
-//	if(processNum == -1){
-//		fprintf(stderr, "isReady: PROCESS NOT FOUND IN CONTROL BLOCK\n");
-//		clean(1);
-//		exit(1);
-//	}
-
 	for(i = 0; i < pCount; i++){
 		q = controlBlock[i].q;
 	
@@ -398,11 +394,6 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 				if(peek(0) != -1){
 					processIds[i] = peek(0);
 					for(j = 0; j < pCount; j++){
-						//if(controlBlock[j].pid == processIds[i]){
-						//	totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
-						//	processCount++;
-						//	break;
-						//}
 						if(controlBlock[j].q == 1){
 							totalTime[0][0] = totalTime[0][0] + controlBlock[j].waitTime[0];
 							if((totalTime[0][1] + controlBlock[j].waitTime[1]) >= 1000000000){
@@ -426,7 +417,7 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 					averageWaitTime[0][1] = 0;
 				}
 				if(((controlBlock[processNum].waitTime[0] > A * averageWaitTime[0][0]) || (controlBlock[processNum].waitTime[0] == A * averageWaitTime[0][0] &&
-						controlBlock[processNum].waitTime[1] > averageWaitTime[0][1])) && (controlBlock[processNum].waitTime[0] >= 5)){
+						controlBlock[processNum].waitTime[1] > averageWaitTime[0][1])) && (controlBlock[processNum].waitTime[0] >= 1)){
 					fprintf(file, "OSS: Moving process with PID %d from queue 0 to queue 1 at time %d:%d\n", peek(0), clock[0], clock[1]);	
 					controlBlock[processNum].q = 1;
 					delete(0);
@@ -438,11 +429,6 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 				if(peek(1) != -1){
 					processIds[i] = peek(1);
 					for(j = 0; j < pCount; j++){
-						//if(controlBlock[j].pid == processIds[i]){
-						//	totalTime = totalTime + controlBlock[processNum].waitTime[0] + controlBlock[processNum].waitTime[1];
-						//	processCount++;
-						//	break;
-						//}
 						if(controlBlock[j].q == 2){
 							totalTime[1][0] = totalTime[1][0] + controlBlock[j].waitTime[0];
 							if((totalTime[1][1] + controlBlock[j].waitTime[1]) >= 1000000000){
@@ -484,62 +470,51 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 	if(peek(0) != -1){
 		for(i = 0; i < 19; i++){
 			if(controlBlock[i].pid == peek(0)){
-				for(j = 0; j < 19; j++){
-					if(controlBlock[j].ready == true){
-						dispatch = false;
-						break;
-					}
-				}
-				if(dispatch){
-					controlBlock[i].ready = true;
-					fprintf(file, "OSS: Dispatching process with PID %d from queue 0 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
-					delete(0);
-					controlBlock[i].q = -1;
-					sb.sem_op = -1;
-					sb.sem_num = 0;
-					sb.sem_flg = 0;
-					semop(semid, &sb, 1);
-					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
-					break;
-				}
+				controlBlock[i].ready = true;
+				fprintf(file, "OSS: Dispatching process with PID %d from queue 0 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
+				delete(0);
+				controlBlock[i].q = -1;
+				sb.sem_op = -1;
+				sb.sem_num = 0;
+				sb.sem_flg = 0;
+				semop(semid, &sb, 1);
+				fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
+				waitpid(controlBlock[i].pid, NULL, 0);
+				controlBlock[i].pid = -2;
 				break;
 			}
 		}
 	}else if(peek(1) != -1){
 		for(i = 0; i < 19; i++){
 			if(controlBlock[i].pid == peek(1)){
-				for(j = 0; j < 19; j++){
-					if(controlBlock[j].ready == true){
-						dispatch = false;
-						break;
-					}
-				}
-				if(dispatch){
-					controlBlock[i].ready = true;
-					fprintf(file, "OSS: Dispatching process with PID %d from queue 1 at time %d:%d\n", peek(1), clock[0], clock[1]);
-					delete(1);
-					controlBlock[i].q = -1;
-					break;
-				}
+				controlBlock[i].ready = true;
+				fprintf(file, "OSS: Dispatching process with PID %d from queue 1 at time %d:%d\n", peek(1), clock[0], clock[1]);
+				delete(1);
+				controlBlock[i].q = -1;
+				sb.sem_op = -1;
+				sb.sem_num = 0;
+				sb.sem_flg = 0;
+				semop(semid, &sb, 1);
+				fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
+				waitpid(controlBlock[i].pid, NULL, 0);
+				controlBlock[i].pid = -2;
 				break;
 			}
 		}
 	}else if(peek(2) != -1){
 		for(i = 0; i < 19; i++){
 			if(controlBlock[i].pid == peek(2)){
-				for(j = 0; j < 19; j++){
-					if(controlBlock[j].ready == true){
-						dispatch = false;
-						break;
-					}
-				}
-				if(dispatch){
-					controlBlock[i].ready = true;
-					fprintf(file, "OSS: Dispatching process with PID %d from queue 2 at time %d:%d\n", peek(2), clock[0], clock[1]);
-					delete(2);
-					controlBlock[i].q = -1;
-					break;
-				}
+				controlBlock[i].ready = true;
+				fprintf(file, "OSS: Dispatching process with PID %d from queue 2 at time %d:%d\n", peek(2), clock[0], clock[1]);
+				delete(2);
+				controlBlock[i].q = -1;
+				sb.sem_op = -1;
+				sb.sem_num = 0;
+				sb.sem_flg = 0;
+				semop(semid, &sb, 1);
+				fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
+				waitpid(controlBlock[i].pid, NULL, 0);
+				controlBlock[i].pid = -2;
 				break;
 			}
 		}
