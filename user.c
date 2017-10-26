@@ -20,8 +20,6 @@ int main(int argc, char* argv[]){
 	int quantumUse = rand() % 2;
 	int quantumLength[2];
 	int index = atoi(argv[1]);
-	int i;
-	int processIndex = -1;
 	controlBlockStruct* controlBlock;
 	bool ready = false;
 
@@ -42,7 +40,7 @@ int main(int argc, char* argv[]){
 		}
 	}
 
-	if(controlBlock[index].task == 1 || controlBlock[index].task == 3){
+	if(controlBlock[index].task == 1){
 		if(quantumUse == 1){
 			quantumLength[0] = rand() % controlBlock[index].quantum[0] + 1;
 			quantumLength[1] = rand() % controlBlock[index].quantum[1] + 1;
@@ -50,8 +48,27 @@ int main(int argc, char* argv[]){
 			quantumLength[0] = controlBlock[index].quantum[0];
 			quantumLength[1] = controlBlock[index].quantum[1];
 		}
-	}	
-	
+	}else if(controlBlock[index].task == 3){
+		if(quantumUse == 1){
+			quantumLength[0] = rand() % controlBlock[index].quantum[0] + 1;
+			quantumLength[1] = rand() % controlBlock[index].quantum[1] + 1;
+		}else{
+			quantumLength[0] = controlBlock[index].quantum[0];
+			quantumLength[1] = controlBlock[index].quantum[1];
+		}
+		quantumLength[0] = quantumLength[0] * (controlBlock[index].p/100);
+		quantumLength[1] = quantumLength[1] * (controlBlock[index].p/100);
+	}else if(controlBlock[index].task == 2){
+		quantumLength[0] = controlBlock[index].quantum[0];
+		quantumLength[1] = controlBlock[index].quantum[1];
+	}
+	clock[0] += quantumLength[0];
+	if(clock[1] + quantumLength[1] >= 1000000000){
+		clock[1] = (clock[1] + quantumLength[1]) % 1000000000;
+		clock[0]++;
+	}else{
+		clock[1] += quantumLength[1];
+	}
 	controlBlock[index].ready = false;
 	sb.sem_op = 1;
 	sb.sem_num = 0;

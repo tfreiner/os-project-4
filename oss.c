@@ -330,9 +330,6 @@ int main(int argc, char* argv[]){
 
 void schedule(int pid, controlBlockStruct* controlBlock, FILE* file){
 	int i;
-	int quantum[2];
-	quantum[0] = 2;
-	quantum[1] = 5000;
 	insert(0, pid);
 	int randNum = rand() % 4;
 	int r = rand() % 6;
@@ -351,13 +348,13 @@ void schedule(int pid, controlBlockStruct* controlBlock, FILE* file){
 		exit(1);
 	}
 	controlBlock[processNum].dispatchValue = randNum;
+	controlBlock[processNum].quantum[0] = 4;
+	controlBlock[processNum].quantum[1] = 10000;
 	switch(randNum){
 		case 0:
 			controlBlock[processNum].task = 0;
 			break;
 		case 1:
-			controlBlock[processNum].quantum[0] = quantum[0];
-			controlBlock[processNum].quantum[1] = quantum[1];
 			controlBlock[processNum].task = 1;
 			break;
 		case 2:
@@ -367,8 +364,6 @@ void schedule(int pid, controlBlockStruct* controlBlock, FILE* file){
 			break;
 		case 3:
 			controlBlock[processNum].p = p;
-			controlBlock[processNum].quantum[0] = quantum[0];
-			controlBlock[processNum].quantum[1] = quantum[1];
 			controlBlock[processNum].task = 3;
 			break;
 	}
@@ -476,6 +471,7 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					delete(0);
 					controlBlock[i].q = -1;
 					//waitpid(controlBlock[i].pid, NULL, 0);
+					kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
 				}else if(controlBlock[i].task == 2){
@@ -491,7 +487,9 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					sb.sem_flg = 0;
 					semop(semid, &sb, 1);
 					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
+					fprintf(file, "OSS: Terminating process with PID %d from queue 0 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					waitpid(controlBlock[i].pid, NULL, 0);
+					//kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
 				}
@@ -505,12 +503,15 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					delete(1);
 					controlBlock[i].q = -1;
 					//waitpid(controlBlock[i].pid, NULL, 0);
+					kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
 				}else if(controlBlock[i].task == 2){
 					if(controlBlock[i].r > controlBlock[i].waitTime[0] || (controlBlock[i].r == controlBlock[i].waitTime[0] && controlBlock[i].s > controlBlock[i].waitTime[1]))
 						break;
 				}else{
+					controlBlock[i].quantum[0] = 2;
+					controlBlock[i].quantum[1] = 5000;
 					controlBlock[i].ready = true;
 					fprintf(file, "OSS: Dispatching process with PID %d from queue 1 at time %d:%d\n", peek(1), clock[0], clock[1]);
 					delete(1);
@@ -520,7 +521,9 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					sb.sem_flg = 0;
 					semop(semid, &sb, 1);
 					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
+					fprintf(file, "OSS: Terminating process with PID %d from queue 1 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					waitpid(controlBlock[i].pid, NULL, 0);
+					//kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
 				}
@@ -534,12 +537,15 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					delete(2);
 					controlBlock[i].q = -1;
 					//waitpid(controlBlock[i].pid, NULL, 0);
+					kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
 				}else if(controlBlock[i].task == 2){
 					if(controlBlock[i].r > controlBlock[i].waitTime[0] || (controlBlock[i].r == controlBlock[i].waitTime[0] && controlBlock[i].s > controlBlock[i].waitTime[1]))
 						break;
 				}else{
+					controlBlock[i].quantum[0] = 1;
+					controlBlock[i].quantum[1] = 2500;
 					controlBlock[i].ready = true;
 					fprintf(file, "OSS: Dispatching process with PID %d from queue 2 at time %d:%d\n", peek(2), clock[0], clock[1]);
 					delete(2);
@@ -549,7 +555,9 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					sb.sem_flg = 0;
 					semop(semid, &sb, 1);
 					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
+					fprintf(file, "OSS: Terminating process with PID %d from queue 2 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					waitpid(controlBlock[i].pid, NULL, 0);
+					//kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
 				}
