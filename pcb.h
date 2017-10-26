@@ -12,6 +12,7 @@ typedef struct controlBlockStruct{
 	int systemTime;
 	int lastBurstTime;
 	int processPriority;
+	int dispatchValue;
 	int startTime[2];
 	int waitTime[2];
 	int q;

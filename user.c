@@ -41,19 +41,22 @@ int main(int argc, char* argv[]){
 			ready = true;
 		}
 	}
-	if(quantumUse == 1){
-		quantumLength[0] = rand() % controlBlock[processIndex].quantum[0] + 1;
-		quantumLength[1] = rand() % controlBlock[processIndex].quantum[1] + 1;
-	}else{
-		quantumLength[0] = controlBlock[processIndex].quantum[0];
-		quantumLength[1] = controlBlock[processIndex].quantum[1];
-	}
-	controlBlock[index].ready = false;
 
+	if(controlBlock[index].task == 1 || controlBlock[index].task == 3){
+		if(quantumUse == 1){
+			quantumLength[0] = rand() % controlBlock[index].quantum[0] + 1;
+			quantumLength[1] = rand() % controlBlock[index].quantum[1] + 1;
+		}else{
+			quantumLength[0] = controlBlock[index].quantum[0];
+			quantumLength[1] = controlBlock[index].quantum[1];
+		}
+	}	
+	
+	controlBlock[index].ready = false;
 	sb.sem_op = 1;
 	sb.sem_num = 0;
 	sb.sem_flg = 0;
 	semop(semid, &sb, 1);
-
+	
 	return 0;
 }
