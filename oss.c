@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
- * Date: October 24th, 2017
- * Log: Handling removing and forking new processes 
+ * Date: October 28th, 2017
+ * Log: Adding average wait and turnaround times
  */
 
 #include <stdio.h>
@@ -53,7 +53,7 @@ void schedule(int, controlBlockStruct*, FILE*);
 
 void update(int, int*, controlBlockStruct*, FILE*);
 
-void dispatch(controlBlockStruct*, int*, FILE*, int);
+void dispatch(controlBlockStruct*, int*, FILE*, int, int*, int*);
 
 bool isQueue0Full(){
 	return queue0Count == 19;
@@ -184,6 +184,12 @@ int main(int argc, char* argv[]){
 	int bitArray[1] = { 0 };
 	bool tableFull = 0;
 	int processCount = 0;
+	int turnaroundTime[2];
+	int waitTime[2];
+	turnaroundTime[0] = 0;
+	turnaroundTime[1] = 0;
+	waitTime[0] = 0;
+	waitTime[1] = 0;
 	controlBlockStruct* controlBlock;
 
 	//SIGNAL HANDLING
@@ -245,6 +251,7 @@ int main(int argc, char* argv[]){
 	int incrementTime;
 	int lastForkTime[2];
 	int processIndex = 0;
+	int totalProcessNum = 0;
 	lastForkTime[0] = clock[0];
 	lastForkTime[1] = clock[1];
 	pid_t childpid;
@@ -261,7 +268,7 @@ int main(int argc, char* argv[]){
 			clock[1] += incrementTime;
 		if(processCount > 0){
 			update(processCount, clock, controlBlock, file);
-			dispatch(controlBlock, clock, file, semid);		
+			dispatch(controlBlock, clock, file, semid, turnaroundTime, waitTime);
 		}
 		if(processCount == 19){
 			for(i = 0 ; i < 19; i++){
@@ -307,6 +314,7 @@ int main(int argc, char* argv[]){
 					processIds[processIndex] = childpid;
 					processCount++;
 					processIndex++;
+					totalProcessNum++;
 				}
 				if(errno){
 					fprintf(stderr, "%s\n", strerror(errno));
@@ -316,11 +324,19 @@ int main(int argc, char* argv[]){
 		}
 
 		if(clock[0] > 100){
-			clean(1);
-			exit(1);
+			break;
 		}
 	}
 
+	int avTurnTime[2];
+	int avWaitTime[2];
+	avTurnTime[0] = turnaroundTime[0] / totalProcessNum;
+	avTurnTime[1] = turnaroundTime[1] / totalProcessNum;
+	avWaitTime[0] = waitTime[0] / totalProcessNum;
+	avWaitTime[1] = waitTime[1] / totalProcessNum;
+	printf("Average turnaround time: %d.%d\n", avTurnTime[0], avTurnTime[1]);
+	printf("Average wait time: %d.%d\n", avWaitTime[0], avWaitTime[1]);
+	//printf("CPU idle time: %d.%d\n", cpuIdleTime[0], cpuIdleTime[1]);
 	sleep(10);
 	fclose(file);
 	clean(1);
@@ -458,7 +474,7 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 	}
 }
 
-void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semid){
+void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semid, int *turnaroundTime, int *waitTime){
 	int i, j;
 	bool dispatch = true;
 	bool done = false;
@@ -489,6 +505,32 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
 					fprintf(file, "OSS: Terminating process with PID %d from queue 0 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					waitpid(controlBlock[i].pid, NULL, 0);
+					turnaroundTime[0] += (clock[0] - controlBlock[i].startTime[0]);
+					if(clock[1] < controlBlock[i].startTime[1]){
+						turnaroundTime[0]--;
+						if(turnaroundTime[1] += (1000000000 - controlBlock[i].startTime[1]) > 1000000000){
+							turnaroundTime[1] += (1000000000 - controlBlock[i].startTime[1]) % 1000000000;
+							turnaroundTime[0]++;
+						}else{	
+							turnaroundTime[1] += (1000000000 - controlBlock[i].startTime[1]);
+						}
+					}else{
+						if(turnaroundTime[1] += (clock[1] - controlBlock[i].startTime[1]) > 1000000000){
+							turnaroundTime[1] += (clock[1] - controlBlock[i].startTime[1]) % 1000000000;
+							turnaroundTime[0]++;
+						}else{
+							turnaroundTime[1] += (clock[1] - controlBlock[i].startTime[1]);
+						}
+					}
+
+					waitTime[0] += controlBlock[i].waitTime[0];
+					if(waitTime[1] += controlBlock[i].waitTime[1] > 1000000000){
+						waitTime[1] += controlBlock[i].waitTime[1] % 1000000000;
+						waitTime[0]++;
+					}else{
+						waitTime[1] += controlBlock[i].waitTime[1];
+					}
+	
 					//kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
@@ -524,6 +566,31 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					fprintf(file, "OSS: Terminating process with PID %d from queue 1 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					waitpid(controlBlock[i].pid, NULL, 0);
 					//kill(controlBlock[i].pid, SIGKILL);
+					turnaroundTime[0] += (clock[0] - controlBlock[i].startTime[0]);
+					if(clock[1] < controlBlock[i].startTime[1]){
+						turnaroundTime[0]--;
+						if(turnaroundTime[1] += (1000000000 - controlBlock[i].startTime[1]) > 1000000000){
+							turnaroundTime[1] += (1000000000 - controlBlock[i].startTime[1]) % 1000000000;
+							turnaroundTime[0]++;
+						}else{
+							turnaroundTime[1] += (1000000000 - controlBlock[i].startTime[1]);
+						}
+					}else{
+						if(turnaroundTime[1] += (clock[1] - controlBlock[i].startTime[1]) > 1000000000){
+							turnaroundTime[1] += (clock[1] - controlBlock[i].startTime[1]) % 1000000000;
+							turnaroundTime[0]++;
+						}else{
+							turnaroundTime[1] += (clock[1] - controlBlock[i].startTime[1]);
+						}
+					}
+
+					waitTime[0] += controlBlock[i].waitTime[0];
+					if(waitTime[1] += controlBlock[i].waitTime[1] > 1000000000){
+						waitTime[1] += controlBlock[i].waitTime[1] % 1000000000;
+						waitTime[0]++;
+					}else{
+						waitTime[1] += controlBlock[i].waitTime[1];
+					}					
 					controlBlock[i].pid = -2;
 					break;
 				}
@@ -558,6 +625,31 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					fprintf(file, "OSS: Terminating process with PID %d from queue 2 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					waitpid(controlBlock[i].pid, NULL, 0);
 					//kill(controlBlock[i].pid, SIGKILL);
+					turnaroundTime[0] += (clock[0] - controlBlock[i].startTime[0]);
+					if(clock[1] < controlBlock[i].startTime[1]){
+						turnaroundTime[0]--;
+						if(turnaroundTime[1] += (1000000000 - controlBlock[i].startTime[1]) > 1000000000){
+							turnaroundTime[1] += (1000000000 - controlBlock[i].startTime[1]) % 1000000000;
+							turnaroundTime[0]++;
+						}else{
+							turnaroundTime[1] += (1000000000 - controlBlock[i].startTime[1]);
+						}
+					}else{
+						if(turnaroundTime[1] += (clock[1] - controlBlock[i].startTime[1]) > 1000000000){
+							turnaroundTime[1] += (clock[1] - controlBlock[i].startTime[1]) % 1000000000;
+							turnaroundTime[0]++;
+						}else{
+							turnaroundTime[1] += (clock[1] - controlBlock[i].startTime[1]);
+						}
+					}
+					
+					waitTime[0] += controlBlock[i].waitTime[0];
+					if(waitTime[1] += controlBlock[i].waitTime[0] > 1000000000){
+						waitTime[1] += controlBlock[i].waitTime[1] % 1000000000;
+						waitTime[0]++;
+					}else{
+						waitTime[1] += controlBlock[i].waitTime[1];
+					}
 					controlBlock[i].pid = -2;
 					break;
 				}
