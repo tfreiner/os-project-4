@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
- * Date: October 28th, 2017
- * Log: Adding average wait and turnaround times
+ * Date: October 31st, 2017
+ * Log: Final touches
  */
 
 #include <stdio.h>
@@ -30,7 +30,7 @@
 
 struct sembuf sb;
 int sharedmem[3];
-int processCount = 0;
+int globalProcessCount = 0;
 int processIds[100];
 int queue0[PROCESS_MAX];
 int queue1[PROCESS_MAX];
@@ -53,7 +53,7 @@ void schedule(int, controlBlockStruct*, FILE*);
 
 void update(int, int*, controlBlockStruct*, FILE*);
 
-void dispatch(controlBlockStruct*, int*, FILE*, int, int*, int*);
+void dispatch(controlBlockStruct*, int*, FILE*, int, int*, int*, int*, int*);
 
 bool isQueue0Full(){
 	return queue0Count == 19;
@@ -171,7 +171,7 @@ void clean(int sig){
 	shmctl(sharedmem[0], IPC_RMID, NULL);
 	shmctl(sharedmem[1], IPC_RMID, NULL);
 	semctl(sharedmem[2], 0, IPC_RMID);
-	for(i = 0; i < processCount; i++){
+	for(i = 0; i < globalProcessCount; i++){
 		kill(processIds[i], SIGKILL);
 	}
 	exit(1);
@@ -186,10 +186,13 @@ int main(int argc, char* argv[]){
 	int processCount = 0;
 	int turnaroundTime[2];
 	int waitTime[2];
+	int idleTime[2];
 	turnaroundTime[0] = 0;
 	turnaroundTime[1] = 0;
 	waitTime[0] = 0;
 	waitTime[1] = 0;
+	idleTime[0] = 0;
+	idleTime[1] = 0;
 	controlBlockStruct* controlBlock;
 
 	//SIGNAL HANDLING
@@ -250,10 +253,13 @@ int main(int argc, char* argv[]){
 	int forkTime;
 	int incrementTime;
 	int lastForkTime[2];
+	int lastClockTime[2];
 	int processIndex = 0;
 	int totalProcessNum = 0;
 	lastForkTime[0] = clock[0];
 	lastForkTime[1] = clock[1];
+	lastClockTime[0] = clock[0];
+	lastClockTime[1] = clock[1];
 	pid_t childpid;
 	srand(time(NULL));
 	forkTime = rand() % 3;
@@ -268,7 +274,7 @@ int main(int argc, char* argv[]){
 			clock[1] += incrementTime;
 		if(processCount > 0){
 			update(processCount, clock, controlBlock, file);
-			dispatch(controlBlock, clock, file, semid, turnaroundTime, waitTime);
+			dispatch(controlBlock, clock, file, semid, turnaroundTime, waitTime, idleTime, lastClockTime);
 		}
 		if(processCount == 19){
 			for(i = 0 ; i < 19; i++){
@@ -280,7 +286,7 @@ int main(int argc, char* argv[]){
 				}
 			}
 		}
-		if(((clock[0] * 1000000000 + clock[1]) - (lastForkTime[0] * 1000000000 + lastForkTime[1]) > (forkTime * 1000000000))){
+		if(clock[0] - lastForkTime[0] > forkTime){
 			lastForkTime[0] = clock[0];
 			lastForkTime[1] = clock[1];
 			forkTime = rand() % 3;
@@ -295,8 +301,8 @@ int main(int argc, char* argv[]){
 			if(!tableFull){
 				childpid = fork();
 				if(errno){
-					fprintf(stderr, "...%s", strerror(errno));
-					exit(1);
+					fprintf(stderr, "%s", strerror(errno));
+					clean(1);
 				}
 
 				fprintf(file, "OSS: Generating process with PID %d and putting it in queue 0 at time %d:%d\n", childpid, clock[0], clock[1]);
@@ -313,6 +319,7 @@ int main(int argc, char* argv[]){
 					schedule(childpid, controlBlock, file);
 					processIds[processIndex] = childpid;
 					processCount++;
+					globalProcessCount++;
 					processIndex++;
 					totalProcessNum++;
 				}
@@ -322,6 +329,9 @@ int main(int argc, char* argv[]){
 				}
 			}
 		}
+
+		lastClockTime[0] = clock[0];
+		lastClockTime[1] = clock[1];
 
 		if(clock[0] > 100){
 			break;
@@ -336,7 +346,8 @@ int main(int argc, char* argv[]){
 	avWaitTime[1] = waitTime[1] / totalProcessNum;
 	printf("Average turnaround time: %d.%d\n", avTurnTime[0], avTurnTime[1]);
 	printf("Average wait time: %d.%d\n", avWaitTime[0], avWaitTime[1]);
-	//printf("CPU idle time: %d.%d\n", cpuIdleTime[0], cpuIdleTime[1]);
+	printf("CPU idle time: %d.%d\n", idleTime[0], idleTime[1]);
+	printf("Total number of processes: %d\n", totalProcessNum);
 	sleep(10);
 	fclose(file);
 	clean(1);
@@ -391,8 +402,7 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 	int i, j, q;
 	int averageWaitTime[2][2];
 	int totalTime[3][2];
-	int processIds[19];
-	int processCount = 0;
+	int localProcessCount = 0;
 	int processNum = -1;
 	
 	for(i = 0; i < pCount; i++){
@@ -404,7 +414,6 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 		switch(q){
 			case 0:
 				if(peek(0) != -1){
-					processIds[i] = peek(0);
 					for(j = 0; j < pCount; j++){
 						if(controlBlock[j].q == 1){
 							totalTime[0][0] = totalTime[0][0] + controlBlock[j].waitTime[0];
@@ -414,15 +423,15 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 							}
 							else
 								totalTime[0][1] = (totalTime[0][1] + controlBlock[j].waitTime[1]);
-							processCount++;
+							localProcessCount++;
 						}
 					}
 				}else{
 					break;
 				}
-				if(processCount > 0){
-					averageWaitTime[0][0] = totalTime[0][0]/processCount;
-					averageWaitTime[0][1] = totalTime[0][1]/processCount;
+				if(localProcessCount > 0){
+					averageWaitTime[0][0] = totalTime[0][0]/localProcessCount;
+					averageWaitTime[0][1] = totalTime[0][1]/localProcessCount;
 				}
 				else{
 					averageWaitTime[0][0] = 0;
@@ -439,7 +448,6 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 	
 			case 1:
 				if(peek(1) != -1){
-					processIds[i] = peek(1);
 					for(j = 0; j < pCount; j++){
 						if(controlBlock[j].q == 2){
 							totalTime[1][0] = totalTime[1][0] + controlBlock[j].waitTime[0];
@@ -449,15 +457,15 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 							}
 							else
 								totalTime[1][1] = (totalTime[1][1] + controlBlock[j].waitTime[1]);
-							processCount++;
+							localProcessCount++;
 						}
 					}
 				}else{
 					break;
 				}
-				if(processCount > 0){
-					averageWaitTime[1][0] = totalTime[1][0]/processCount;
-					averageWaitTime[1][1] = totalTime[1][1]/processCount;
+				if(localProcessCount > 0){
+					averageWaitTime[1][0] = totalTime[1][0]/localProcessCount;
+					averageWaitTime[1][1] = totalTime[1][1]/localProcessCount;
 				}else{
 					averageWaitTime[1][0] = 0;
 					averageWaitTime[1][1] = 0;
@@ -474,19 +482,18 @@ void update(int pCount, int *clock, controlBlockStruct* controlBlock, FILE *file
 	}
 }
 
-void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semid, int *turnaroundTime, int *waitTime){
-	int i, j;
-	bool dispatch = true;
-	bool done = false;
+void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semid, int *turnaroundTime, int *waitTime, int *idleTime, int *lastClockTime){
+	int i;
+	bool isIdle = true;
 
 	if(peek(0) != -1){
+		isIdle = false;
 		for(i = 0; i < 19; i++){
 			if(controlBlock[i].pid == peek(0)){
 				if(controlBlock[i].task == 0){
 					fprintf(file, "OSS: Terminating process with PID %d from queue 0 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					delete(0);
 					controlBlock[i].q = -1;
-					//waitpid(controlBlock[i].pid, NULL, 0);
 					kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
@@ -502,7 +509,7 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					sb.sem_num = 0;
 					sb.sem_flg = 0;
 					semop(semid, &sb, 1);
-					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
+					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, controlBlock[i].quantum[0], controlBlock[i].quantum[1]);
 					fprintf(file, "OSS: Terminating process with PID %d from queue 0 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					waitpid(controlBlock[i].pid, NULL, 0);
 					turnaroundTime[0] += (clock[0] - controlBlock[i].startTime[0]);
@@ -531,20 +538,19 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 						waitTime[1] += controlBlock[i].waitTime[1];
 					}
 	
-					//kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
 				}
 			}
 		}
 	}else if(peek(1) != -1){
+		isIdle = false;
 		for(i = 0; i < 19; i++){
 			if(controlBlock[i].pid == peek(1)){
 				if(controlBlock[i].task == 0){
 					fprintf(file, "OSS: Terminating process with PID %d from queue 1 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					delete(1);
 					controlBlock[i].q = -1;
-					//waitpid(controlBlock[i].pid, NULL, 0);
 					kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
@@ -562,10 +568,9 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					sb.sem_num = 0;
 					sb.sem_flg = 0;
 					semop(semid, &sb, 1);
-					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
+					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, controlBlock[i].quantum[0], controlBlock[i].quantum[1]);
 					fprintf(file, "OSS: Terminating process with PID %d from queue 1 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					waitpid(controlBlock[i].pid, NULL, 0);
-					//kill(controlBlock[i].pid, SIGKILL);
 					turnaroundTime[0] += (clock[0] - controlBlock[i].startTime[0]);
 					if(clock[1] < controlBlock[i].startTime[1]){
 						turnaroundTime[0]--;
@@ -597,13 +602,13 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 			}
 		}
 	}else if(peek(2) != -1){
+		isIdle = false;
 		for(i = 0; i < 19; i++){
 			if(controlBlock[i].pid == peek(2)){
 				if(controlBlock[i].task == 0){
 					fprintf(file, "OSS: Terminating process with PID %d from queue 2 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					delete(2);
 					controlBlock[i].q = -1;
-					//waitpid(controlBlock[i].pid, NULL, 0);
 					kill(controlBlock[i].pid, SIGKILL);
 					controlBlock[i].pid = -2;
 					break;
@@ -621,10 +626,9 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 					sb.sem_num = 0;
 					sb.sem_flg = 0;
 					semop(semid, &sb, 1);
-					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, 5, 4);
+					fprintf(file, "OSS: Receiving that process with PID %d ran for %d.%d seconds.\n", controlBlock[i].pid, controlBlock[i].quantum[0], controlBlock[i].quantum[1]);
 					fprintf(file, "OSS: Terminating process with PID %d from queue 2 at time %d:%d\n", controlBlock[i].pid, clock[0], clock[1]);
 					waitpid(controlBlock[i].pid, NULL, 0);
-					//kill(controlBlock[i].pid, SIGKILL);
 					turnaroundTime[0] += (clock[0] - controlBlock[i].startTime[0]);
 					if(clock[1] < controlBlock[i].startTime[1]){
 						turnaroundTime[0]--;
@@ -655,5 +659,25 @@ void dispatch(controlBlockStruct* controlBlock, int *clock, FILE* file, int semi
 				}
 			}
 		}
+	}
+
+	if(isIdle){
+		idleTime[0] += (clock[0] - lastClockTime[0]);
+		if(clock[1] < lastClockTime[1]){
+			idleTime[0]--;
+			if(idleTime[1] += (1000000000 - lastClockTime[1]) > 1000000000){
+				idleTime[1] += (1000000000 - lastClockTime[1]) % 1000000000;
+				idleTime[0]++;
+			}else{
+				idleTime[1] += (1000000000 - lastClockTime[1]);
+			}
+		}else{
+			if(idleTime[1] += (clock[1] - lastClockTime[1]) > 1000000000){
+				idleTime[1] = (clock[1] - lastClockTime[1]) % 1000000000;
+				idleTime[0]++;
+			}else{
+				idleTime[1] += (clock[1] - lastClockTime[1]);
+			}
+		}	
 	}
 }

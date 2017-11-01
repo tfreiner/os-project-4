@@ -1,7 +1,7 @@
 /**
  * Author: Taylor Freiner
- * Date: October 24th, 2017
- * Log: Fixing semaphore issues 
+ * Date: October 31st, 2017
+ * Log: Final touches
  */
 
 #include <stdio.h>
@@ -12,13 +12,16 @@
 #include <semaphore.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
+#include <string.h>
 #include "pcb.h"
 
 int main(int argc, char* argv[]){
 	struct sembuf sb;
-	srand(time(NULL));
+	srand(time(NULL) ^ (getpid()<<16));
 	int quantumUse = rand() % 2;
 	int quantumLength[2];
+	quantumLength[0] = 0;
+	quantumLength[1] = 0;
 	int index = atoi(argv[1]);
 	controlBlockStruct* controlBlock;
 	bool ready = false;
@@ -69,11 +72,14 @@ int main(int argc, char* argv[]){
 	}else{
 		clock[1] += quantumLength[1];
 	}
+	controlBlock[index].quantum[0] = quantumLength[0];
+	controlBlock[index].quantum[1] = quantumLength[1];
+
 	controlBlock[index].ready = false;
 	sb.sem_op = 1;
 	sb.sem_num = 0;
 	sb.sem_flg = 0;
 	semop(semid, &sb, 1);
 	
-	return 0;
+	exit(0);
 }

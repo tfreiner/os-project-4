@@ -1,0 +1,10 @@
+Taylor Freiner
+OS PROJECT 4
+
+This project does not have any options or arguments, so to run, simply type make to create the executables, and then type oss to begin execution.
+
+The log file is log.txt.
+
+This program runs for 100 seconds of simulated time.
+
+I was running into a rare issue while running on the server, likely due to too much shared mem on the system, where the program would exit mid execution.  If this happens, another run of the program should be fine.  Wish I had gotten this edge case figured out but I never could.
